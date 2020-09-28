@@ -1,0 +1,9 @@
+{
+  "name": "Ablativo",
+  "version": "1.0.0",
+  "description": "Ablativo devices",
+  "dependencies": {
+    "ble": "^2.0.0"
+  },
+  "targetDependencies": {},
+}
