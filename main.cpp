@@ -5,6 +5,7 @@
 #include "TLSSocket.h"
 #include "MQTTClientMbedOs.h"
 #include "MQTT_server_setting.h"
+#include "ble/BLE.h"
 #include <string>
 
 
@@ -14,19 +15,27 @@
 #include "stm32l475e_iot01_psensor.h"
 
 
-/* Version and device ID setup -----------------------------------------------*/
+/* Ble service setup */
+#include "beaconService.h"
+
+
+/* Version -----------------------------------------------*/
 #define DEVICE_VERSION "1.0"
-#define DEVICE_ID 1
 
 
-/* utils defines -------------------------------------------------------------*/
+/* utils define --------------------------------------------------------------*/
 #define INTERVAL_TIME 10*1000                 // ms  
 
 
 /* board components ----------------------------------------------------------*/
 DigitalOut led(LED1);
+DigitalOut beacon_led(LED2);
 #define LED_ON  1   
 #define LED_OFF 0
+
+
+/* Function prototypes -------------------------------------------------------*/
+void ble_thread();
 
 
 
@@ -35,6 +44,14 @@ int main(int argc, char* argv[])
 {
     
     mbed_trace_init(); //debug utils
+    
+    printf("\r\n\nAblativo\r\n");
+    printf("Release version %s\r\n", DEVICE_VERSION);
+    printf("Device ID:%d\r\n\n", MBED_CONF_APP_DEVICE_ID);
+
+#ifdef MBED_MAJOR_VERSION
+    printf("Mbed OS version %d.%d.%d\r\n\n", MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION);
+#endif
     
     /* initialize sensors */
     printf("Sensors init... ");
@@ -47,22 +64,13 @@ int main(int argc, char* argv[])
     WiFiInterface* network = NULL;
     TLSSocket* socket = new TLSSocket;
     MQTTClient* mqttClient = NULL;
-
-
-    printf("\r\n\nAblativo\r\n");
-    printf("Release version %s\r\n", DEVICE_VERSION);
-    printf("Device ID:%d\r\n\n", DEVICE_ID);
-
-#ifdef MBED_MAJOR_VERSION
-    printf("Mbed OS version %d.%d.%d\r\n\n", MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION);
-#endif
-
     led = LED_ON;
+    
     
     /* Make network interface */
     network = WiFiInterface::get_default_instance();
     if (!network) {
-        printf("ERROR: No WiFiInterface found.\n");
+        printf("ERROR: No WiFiInterface found.\r\n");
         return -1;
     }
 
@@ -71,16 +79,16 @@ int main(int argc, char* argv[])
     printf("\nConnecting to %s...\n", MBED_CONF_APP_WIFI_SSID);
     nsapi_error_t ret = network->connect(MBED_CONF_APP_WIFI_SSID, MBED_CONF_APP_WIFI_PASSWORD, NSAPI_SECURITY_WPA_WPA2);
     if (ret != 0) {
-        printf("\nConnection error: %d\n", ret);
+        printf("\nConnection error: %d\r\n", ret);
         return -1;
     }
 
-    printf("Success\n\n");
-    printf("MAC: %s\n", network->get_mac_address());
+    printf("Success\r\n\n");
+    printf("MAC: %s\r\n", network->get_mac_address());
     
     SocketAddress WifiSockAdd;   
     network->get_ip_address(&WifiSockAdd);
-    printf("IP: %s\n\n", WifiSockAdd.get_ip_address());
+    printf("IP: %s\r\n\n", WifiSockAdd.get_ip_address());
     
 
     /* Establish connection with AWS */
@@ -110,7 +118,7 @@ int main(int argc, char* argv[])
     printf("Connection established.\r\n\n");
     
     
-    /* Establish MQTT connection. */
+    /* Establish a MQTT connection. */
     printf("Client id: %s\r\n", MQTT_CLIENT_ID);  
     printf("MQTT client is connecting to the service ...\r\n");
     {
@@ -130,6 +138,12 @@ int main(int argc, char* argv[])
     }
     printf("Client connected.\r\n\n");
     led = LED_OFF;
+    
+    
+    /* run ble on new thread */
+    Thread thread_ble;
+    thread_ble.start(callback(ble_thread));
+    beacon_led = LED_ON;
 
     
     /* Main loop */
@@ -155,7 +169,7 @@ int main(int argc, char* argv[])
         
         
         /* Compose message */
-        std::string telemetries = std::string("{\"deviceId\":") + std::to_string(DEVICE_ID) + 
+        std::string telemetries = std::string("{\"deviceId\":") + std::to_string(MBED_CONF_APP_DEVICE_ID) + 
             ",\"temp\":" + temp + ",\"hum\":" + hum + ",\"press\":" + press + "}"; 
         char* buf = (char*)telemetries.c_str();
 
@@ -201,4 +215,16 @@ int main(int argc, char* argv[])
     }
     
     printf("The client has been disconnected \r\nPush reset button to restart\r\n");
+}
+
+
+
+/* Functions -----------------------------------------------------------------*/
+void ble_thread(){
+    printf("BLE running...\r\n\n");
+    BLE &ble = BLE::Instance();
+    ble.onEventsToProcess(schedule_ble_events);
+
+    Beacon beacon(ble, event_queue);
+    beacon.start();
 }
